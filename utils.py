@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Sequence
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 RING_BOUNDS = (
     (1280, 2816), (4352, 5888), (7424, 8960), (10496, 12032),
@@ -78,10 +78,17 @@ def write_counter_files(count: int, output_dir: str | Path = ".") -> None:
     write_text_atomic(output / "fun_facts.txt", "\n".join(facts) + ("\n" if facts else ""))
 
 
+DONE_COLOR = "#22c55e"
+SKIPPED_COLOR = "#ef4444"
+UNVISITED_COLOR = "#9ca3af"
+RING_MARKER_COLOR = "cyan"
+
+
 def update_map(engine, output_dir: str | Path = ".") -> dict:
     """Render the engine state and regenerate all OBS-friendly exports."""
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
+
     size = MAP_SIZE
     image = Image.new("RGBA", (size, size), "white")
     background = Path(getattr(engine, "background_path", "rings.png"))
@@ -91,35 +98,57 @@ def update_map(engine, output_dir: str | Path = ".") -> dict:
     draw = ImageDraw.Draw(image)
 
     def point(coords):
-        return (round((coords[0] + WORLD_HALF) * size / (2 * WORLD_HALF)), round((WORLD_HALF - coords[1]) * size / (2 * WORLD_HALF)))
+        return (
+            round((coords[0] + WORLD_HALF) * size / (2 * WORLD_HALF)),
+            round((WORLD_HALF - coords[1]) * size / (2 * WORLD_HALF)),
+        )
+
+    def dot(coords, radius, fill, outline=None, width=1):
+        x, y = point(coords)
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=fill, outline=outline, width=width)
+
+    # Where each player has been (their colour) and what they skipped (grey).
+    for player in engine.players.values():
+        for start, end, kind in player.path_history:
+            draw.line((point(start), point(end)), fill=player.color if kind == "done" else UNVISITED_COLOR, width=2)
 
     for index, sh in enumerate(engine.estimated_strongholds):
-        color = "gray"
-        if sh in engine.completed_coordinates:
-            color = "green"
-        elif index == engine.current_target_index:
-            color = "blue"
-        x, y = point(sh)
-        radius = 4 if color != "gray" else 3
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+        if sh is None:
+            continue
+        if index in engine.completed:
+            dot(sh, 4, DONE_COLOR)
+        elif index in engine.skipped:
+            dot(sh, 4, SKIPPED_COLOR)
+        else:
+            dot(sh, 3, UNVISITED_COLOR)
 
-    # Show manually logged ring coordinates even while the tour is unavailable.
-    for ring, sh in enumerate(engine.ring_strongholds, 1):
+    # Manually logged ring strongholds stay visible even before a route exists.
+    for sh in engine.ring_strongholds:
         if sh is not None:
-            x, y = point(sh)
-            draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill="cyan", outline="black", width=1)
+            dot(sh, 6, RING_MARKER_COLOR, outline="black")
 
-    history = engine.path_history
-    for start, end, color in history:
-        draw.line((point(start), point(end)), fill=color, width=2)
-    current = engine.get_current_target()["target"]
-    if current is not None:
-        draw.line((point(engine.current_position), point(current)), fill="blue", width=2)
+    # Each player's position, current target and the leg between them.
+    targets = engine.current_targets()
+    for player in engine.players.values():
+        index = targets.get(player.name)
+        if index is not None:
+            target = engine.estimated_strongholds[index]
+            draw.line((point(player.position), point(target)), fill=player.color, width=2)
+            dot(target, 8, None, outline=player.color, width=3)
+        dot(player.position, 5, player.color, outline="white")
+
+    # Legend (large enough to read in an OBS scene)
+    font = ImageFont.load_default(size=18)
+    for row, player in enumerate(engine.players.values()):
+        top = 8 + row * 24
+        draw.rectangle((8, top, 24, top + 16), fill=player.color)
+        draw.text((32, top - 1), player.name, fill="black", font=font)
 
     tmp_png = output / "output.png.tmp"
     image.save(tmp_png, format="PNG")
     _replace(tmp_png, output / "output.png")
     write_counter_files(engine.completed_count, output)
+
     return {
         "output": str(output / "output.png"),
         "count": str(output / "sh_count.txt"),

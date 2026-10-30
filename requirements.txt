@@ -1,4 +1,4 @@
 ortools
-Pillow
+Pillow>=10.1
 fastapi
 uvicorn
