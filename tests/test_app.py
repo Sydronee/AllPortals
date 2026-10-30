@@ -197,3 +197,8 @@ def test_token_protection(tmp_path, monkeypatch):
 def test_index_page_is_served(client):
     page = client.get("/")
     assert page.status_code == 200 and "AllPortals" in page.text
+
+
+def test_overlay_page_is_served(client):
+    page = client.get("/overlay")
+    assert page.status_code == 200 and "/api/state" in page.text

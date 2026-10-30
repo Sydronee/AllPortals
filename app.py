@@ -33,6 +33,7 @@ OUTPUT_DIR = HOME_DIR / "output"  # served under /static and read by OBS
 DATA_DIR = HOME_DIR / "data"  # private: the saved run lives here
 STATE_FILE = DATA_DIR / "state.json"
 INDEX_FILE = ROOT_DIR / "index.html"
+OVERLAY_FILE = ROOT_DIR / "overlay.html"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -228,6 +229,12 @@ def root() -> FileResponse:
     if not INDEX_FILE.is_file():
         raise HTTPException(status_code=404, detail="index.html is not available")
     return FileResponse(INDEX_FILE)
+
+
+@app.get("/overlay")
+def overlay() -> FileResponse:
+    """Self-refreshing page for an OBS browser source."""
+    return FileResponse(OVERLAY_FILE)
 
 
 @app.get("/api/state")

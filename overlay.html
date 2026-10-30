@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AllPortals Overlay</title>
+    <style>
+        html, body { margin: 0; background: transparent; overflow: hidden; }
+        body { font-family: system-ui, "Segoe UI", sans-serif; color: #fff; text-shadow: 0 0 4px #000, 0 0 4px #000; }
+        #map { display: block; width: 100%; height: auto; }
+        .text { font-size: 28px; font-weight: bold; padding: 4px 8px; }
+        .fact { font-size: 18px; font-weight: normal; font-style: italic; }
+        [hidden] { display: none; }
+    </style>
+</head>
+<body>
+    <img id="map" alt="AllPortals map" hidden>
+    <div class="text" id="count" hidden></div>
+    <div class="text fact" id="fact" hidden></div>
+<script>
+    // /overlay?show=map,count,fact   (default: map)
+    const show = new Set((new URLSearchParams(location.search).get('show') || 'map').split(','));
+    const map = document.getElementById('map');
+    const count = document.getElementById('count');
+    const fact = document.getElementById('fact');
+    map.hidden = !show.has('map');
+
+    async function refresh() {
+        try {
+            const res = await fetch('/api/state');
+            if (!res.ok) return;
+            const state = await res.json();
+            if (show.has('map') && map.dataset.src !== state.image_url) {
+                // Load off-screen first so the map never flickers or blanks.
+                const next = new Image();
+                next.onload = () => { map.src = next.src; map.dataset.src = state.image_url; map.hidden = false; };
+                next.src = state.image_url;
+            }
+            count.hidden = !show.has('count');
+            count.textContent = state.completed_count;
+            fact.textContent = state.fun_fact || '';
+            fact.hidden = !show.has('fact') || !state.fun_fact;
+        } catch (err) { /* server restarting: keep the last frame */ }
+    }
+    refresh();
+    setInterval(refresh, 1000);
+</script>
+</body>
+</html>

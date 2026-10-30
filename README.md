@@ -77,6 +77,16 @@ All endpoints return the full state (the same document as `GET /api/state`).
 
 Generated assets are served under `/static`; the saved run is not.
 
+## OBS overlay
+
+Add a **Browser** source in OBS and use `http://<tailscale-ip>:5000/overlay`
+(add `?token=...` if you set a token). It refreshes itself every second and has
+a transparent background. Choose what to show with `?show=`:
+
+- `/overlay` shows the map (the default)
+- `/overlay?show=map,count,fact` adds the completed count and the trivia line
+- `/overlay?show=count` shows only the count
+
 # Using the engine from Python
 
 ```python
