@@ -2,7 +2,6 @@ fun_facts.txt
 output.png
 sh_count.txt
 __pycache__/utils.cpython-39.pyc
-utils.py
 strongholds.qs
 AllPortals.spec
 __pycache__/AllPortals.cpython-39.pyc
@@ -22,3 +21,7 @@ build/AllPortals/xref-AllPortals.html
 dist/AllPortals.exe
 dist/rings.png
 __pycache__
+output/
+data/
+.pytest_cache/
+*.tmp

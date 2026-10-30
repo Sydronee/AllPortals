@@ -4,13 +4,11 @@ The command-line interface, when run as a script, is only an adapter around
 ``AllPortalsEngine``. Importing this module never reads input or starts work.
 """
 
+import math
 from pathlib import Path
-from typing import Sequence
 
-import numpy as np
-from ortools.constraint_solver import pywrapcp, routing_enums_pb2
-
-from utils import find_angle, getRing, update_map
+from solver import solve_routes
+from utils import find_angle, get_dist, get_ring, update_map
 
 
 class AllPortalsEngine:
@@ -45,14 +43,12 @@ class AllPortalsEngine:
 
     def add_ring_stronghold(self, x: float, z: float) -> dict:
         coordinates = (int(x), int(z))
-        ring = getRing(coordinates)
+        ring = get_ring(coordinates)
         if ring == 0:
             raise ValueError("Coordinates do not fall within one of the eight ring layers")
         ring_index = ring - 1
         if self.ring_strongholds[ring_index] is not None:
             raise ValueError(f"Ring {ring} has already been recorded")
-        if all(stronghold is not None for stronghold in self.ring_strongholds):
-            raise ValueError("All eight ring strongholds have already been recorded")
         self.ring_strongholds[ring_index] = coordinates
         self.completed_count += 1
         self.completed_coordinates.add(coordinates)
@@ -74,13 +70,13 @@ class AllPortalsEngine:
             existing_ring for existing_ring in self.estimated_rings if existing_ring != ring + 1
         ]
         x, z = stronghold
-        angle = np.arctan2(z, x)
+        angle = math.atan2(z, x)
         estimates = [stronghold]
         for _ in range(self.sh_per_ring[ring] - 1):
-            angle += 2 * np.pi / self.sh_per_ring[ring]
+            angle += 2 * math.pi / self.sh_per_ring[ring]
             estimates.append((
-                round(self.magnitude_per_ring[ring] * np.cos(angle)),
-                round(self.magnitude_per_ring[ring] * np.sin(angle)),
+                round(self.magnitude_per_ring[ring] * math.cos(angle)),
+                round(self.magnitude_per_ring[ring] * math.sin(angle)),
             ))
         self.estimated_strongholds.extend(estimates)
         self.estimated_rings.extend([ring + 1] * len(estimates))
@@ -94,31 +90,11 @@ class AllPortalsEngine:
             self._predict_ring(ring, stronghold)
 
     def solve_tsp(self) -> list[int]:
+        """Plan an open route over every unvisited stronghold, starting from
+        the current position (no return trip is costed)."""
         if len(self.estimated_strongholds) != 128:
             raise ValueError("Eight ring strongholds are required before solving")
-        size = len(self.estimated_strongholds)
-        distances = [
-            [round(np.hypot(a[0] - b[0], a[1] - b[1])) for b in self.estimated_strongholds]
-            for a in self.estimated_strongholds
-        ]
-        manager = pywrapcp.RoutingIndexManager(size, 1, 0)
-        routing = pywrapcp.RoutingModel(manager)
-        callback = routing.RegisterTransitCallback(
-            lambda from_index, to_index: distances[manager.IndexToNode(from_index)][manager.IndexToNode(to_index)]
-        )
-        routing.SetArcCostEvaluatorOfAllVehicles(callback)
-        params = pywrapcp.DefaultRoutingSearchParameters()
-        params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
-        params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-        params.time_limit.seconds = 10
-        solution = routing.SolveWithParameters(params)
-        if solution is None:
-            raise RuntimeError("OR-Tools could not solve the stronghold tour")
-        order = []
-        index = routing.Start(0)
-        while not routing.IsEnd(index):
-            order.append(manager.IndexToNode(index))
-            index = solution.Value(routing.NextVar(index))
+
         # The eight manually found strongholds are already completed.
         self.completed_indices = {
             index for index, stronghold in enumerate(self.estimated_strongholds)
@@ -128,21 +104,20 @@ class AllPortalsEngine:
             index for index, stronghold in enumerate(self.estimated_strongholds)
             if stronghold in self.skipped_coordinates
         }
-        self._tsp_solved = True
         remaining = [
-            i for i in order
+            i for i in range(len(self.estimated_strongholds))
             if i not in self.completed_indices and i not in self._skipped_indices
         ]
-        start = min(
-            range(len(remaining)),
-            key=lambda i: self._distance(self.current_position, self.estimated_strongholds[remaining[i]]),
+        routes = solve_routes(
+            [self.current_position], [self.estimated_strongholds[i] for i in remaining]
         )
-        self.tour_order = remaining[start:] + remaining[:start]
+        self.tour_order = [remaining[k] for k in routes[0]]
+        self._tsp_solved = True
         self.current_target_index = self.tour_order[0] if self.tour_order else None
         return self.tour_order
 
     def _distance(self, a, b):
-        return float(np.hypot(a[0] - b[0], a[1] - b[1]))
+        return get_dist(a, b)
 
     def _advance(self, completed: bool) -> dict:
         if self.current_target_index is None:
@@ -192,12 +167,11 @@ class AllPortalsEngine:
         return self._advance(False)
 
     def reset_spawn(self, x: float = 0, z: float = 0) -> dict:
+        """Move to a new position and re-plan the remaining route from there."""
         self.current_position = (x, z)
-        remaining = [i for i in self.tour_order if i not in self.completed_indices and i not in self._skipped_indices]
-        if remaining:
-            self.tour_order = sorted(remaining, key=lambda i: self._distance(self.current_position, self.estimated_strongholds[i]))
-            self._select_tsp_target()
-        elif not self.solved:
+        if self.solved:
+            self.solve_tsp()
+        else:
             self._select_pre_tsp_target()
         return self.get_current_target()
 
@@ -213,7 +187,7 @@ class AllPortalsEngine:
             "target": target,
             "overworld": target,
             "nether": (round(target[0] / 8), round(target[1] / 8)) if target else None,
-            "ring": getRing(target) if target else None,
+            "ring": get_ring(target) if target else None,
             "remaining": max(0, 128 - self.completed_count),
             "completed": self.completed_count,
             "angle": find_angle(self.current_position, target) if target else None,

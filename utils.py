@@ -1,11 +1,19 @@
 """Geometry, pathfinding, and headless rendering helpers for AllPortals."""
 
 import math
+import os
+import time
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
-import numpy as np
 from PIL import Image, ImageDraw
+
+RING_BOUNDS = (
+    (1280, 2816), (4352, 5888), (7424, 8960), (10496, 12032),
+    (13568, 15104), (16640, 18176), (19712, 21248), (22784, 24320),
+)
+WORLD_HALF = 24320   # outer edge of ring 8; the map spans +-WORLD_HALF blocks
+MAP_SIZE = 870       # output.png size in pixels
 
 
 def is_prime(n: int) -> bool:
@@ -20,58 +28,46 @@ def get_dist(x1: Sequence[float], x2: Sequence[float]) -> float:
     return float(math.hypot(x1[0] - x2[0], x1[1] - x2[1]))
 
 
-def getRing(coords: Sequence[float]) -> int:
+def get_ring(coords: Sequence[float]) -> int:
+    """Ring (1-8) containing the coordinates, or 0 if they fall between rings."""
     distance = get_dist((0, 0), coords)
-    bounds = [
-        (1280, 2816), (4352, 5888), (7424, 8960), (10496, 12032),
-        (13568, 15104), (16640, 18176), (19712, 21248), (22784, 24320),
-    ]
-    for index, (lower, upper) in enumerate(bounds, 1):
-        if lower < distance < upper:
+    for index, (lower, upper) in enumerate(RING_BOUNDS, 1):
+        if lower <= distance <= upper:
             return index
     return 0
 
 
-def find_angle(pos: Sequence[float], nexsh: Sequence[float]) -> float:
-    opposite = int(pos[0]) - int(nexsh[0])
-    adjacent = int(pos[1]) - int(nexsh[1])
-    if adjacent == 0:
-        return 90.0 if opposite >= 0 else -90.0
-    reference = abs(math.degrees(math.atan(opposite / adjacent)))
-    if opposite >= 0 and adjacent >= 0:
-        angle = 180 - reference
-    elif opposite < 0 and adjacent < 0:
-        angle = -reference
-    elif opposite < 0 and adjacent >= 0:
-        angle = reference - 180
-    else:
-        angle = reference
-    return round(angle, 2)
+def find_angle(pos: Sequence[float], target: Sequence[float]) -> float:
+    """Minecraft yaw (F3 'facing') to look from ``pos`` towards ``target``.
 
-
-def generatePath(shs: Sequence[Sequence[float]], pos: Sequence[float]):
-    """Return an in-memory nearest-neighbour path.
-
-    Kept as a small compatibility helper for callers of the old utility
-    function. The engine uses its OR-Tools solver directly.
+    0 is south (+Z), 90 is west (-X), +-180 is north, -90 is east.
     """
-    if not shs:
-        return {}, -1
-    remaining = list(range(len(shs)))
-    current = min(remaining, key=lambda i: get_dist(shs[i], pos))
-    order = [current]
-    remaining.remove(current)
-    while remaining:
-        current = min(remaining, key=lambda i: get_dist(shs[order[-1]], shs[i]))
-        order.append(current)
-        remaining.remove(current)
-    return {order[i]: order[i + 1] for i in range(len(order) - 1)}, order[0]
+    return round(math.degrees(math.atan2(pos[0] - target[0], target[1] - pos[1])), 2)
 
 
-def updateCount(count: int, output_dir: str | Path = ".") -> None:
+def _replace(tmp: Path, dest: Path, attempts: int = 5) -> None:
+    """os.replace with retries: on Windows OBS can briefly hold a file open."""
+    for attempt in range(attempts - 1):
+        try:
+            os.replace(tmp, dest)
+            return
+        except PermissionError:
+            time.sleep(0.05 * (attempt + 1))
+    os.replace(tmp, dest)
+
+
+def write_text_atomic(path: str | Path, text: str) -> None:
+    """Write a file so readers (OBS) never see it half-written."""
+    dest = Path(path)
+    tmp = dest.with_name(dest.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    _replace(tmp, dest)
+
+
+def write_counter_files(count: int, output_dir: str | Path = ".") -> None:
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    (output / "sh_count.txt").write_text(f"{count}/128\n", encoding="utf-8")
+    write_text_atomic(output / "sh_count.txt", f"{count}/128\n")
     facts = []
     if count == 69:
         facts.append("nice.")
@@ -79,14 +75,14 @@ def updateCount(count: int, output_dir: str | Path = ".") -> None:
         facts.append("BRA7-1L")
     if is_prime(count):
         facts.append("(prime)")
-    (output / "fun_facts.txt").write_text("\n".join(facts) + ("\n" if facts else ""), encoding="utf-8")
+    write_text_atomic(output / "fun_facts.txt", "\n".join(facts) + ("\n" if facts else ""))
 
 
 def update_map(engine, output_dir: str | Path = ".") -> dict:
     """Render the engine state and regenerate all OBS-friendly exports."""
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    size = 870
+    size = MAP_SIZE
     image = Image.new("RGBA", (size, size), "white")
     background = Path(getattr(engine, "background_path", "rings.png"))
     if background.exists():
@@ -95,7 +91,7 @@ def update_map(engine, output_dir: str | Path = ".") -> dict:
     draw = ImageDraw.Draw(image)
 
     def point(coords):
-        return (round((coords[0] + 24320) * size / 48640), round((24320 - coords[1]) * size / 48640))
+        return (round((coords[0] + WORLD_HALF) * size / (2 * WORLD_HALF)), round((WORLD_HALF - coords[1]) * size / (2 * WORLD_HALF)))
 
     for index, sh in enumerate(engine.estimated_strongholds):
         color = "gray"
@@ -116,22 +112,16 @@ def update_map(engine, output_dir: str | Path = ".") -> dict:
     history = engine.path_history
     for start, end, color in history:
         draw.line((point(start), point(end)), fill=color, width=2)
-    if engine.current_position is not None and engine.get_current_target()["target"] is not None:
-        draw.line((point(engine.current_position), point(engine.get_current_target()["overworld"])), fill="blue", width=2)
+    current = engine.get_current_target()["target"]
+    if current is not None:
+        draw.line((point(engine.current_position), point(current)), fill="blue", width=2)
 
-    image.save(output / "output.png")
-    updateCount(engine.completed_count, output)
+    tmp_png = output / "output.png.tmp"
+    image.save(tmp_png, format="PNG")
+    _replace(tmp_png, output / "output.png")
+    write_counter_files(engine.completed_count, output)
     return {
         "output": str(output / "output.png"),
         "count": str(output / "sh_count.txt"),
         "facts": str(output / "fun_facts.txt"),
     }
-
-
-def printHelp() -> None:
-    print("Use the AllPortalsEngine API: next_stronghold, mark_empty_sector, reset_spawn, set_count.")
-
-
-def graphAddSH(*args, **kwargs):
-    """Deprecated plotting hook retained for source compatibility."""
-    return None, None
