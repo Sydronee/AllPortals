@@ -1,155 +1,131 @@
-import numpy as np
+"""Geometry, pathfinding, and headless rendering helpers for AllPortals."""
+
 import math
-import matplotlib.pyplot as plt
+from pathlib import Path
+from typing import Iterable, Sequence
+
+import numpy as np
+from PIL import Image, ImageDraw
 
 
-def is_prime(n):
-    if n % 2 == 0 and n > 2:
+def is_prime(n: int) -> bool:
+    if n < 2:
         return False
+    if n % 2 == 0:
+        return n == 2
     return all(n % i for i in range(3, int(math.sqrt(n)) + 1, 2))
 
 
-def generatePath(shs, pos):
-    f = open("strongholds.qs", "w+")
-    print(str(len(shs)), "0", file=f)
-    for sh in shs:
-        print(str(sh[0]), str(sh[1]), file=f)
-    f.close()
-    while True:
-        try:
-            input(
-                "Use the strongholds.qs file in this directory to run concorde pathfinding, then once you solve and save, press enter"
-            )
-
-            f = open("strongholds.qs", "r")
-            lines = f.readlines()
-            f.close()
-
-            paths = {}
-            for i in range(len(shs) + 1, len(lines)):
-                start, end, dist = lines[i].split()
-                paths[int(start)] = int(end)
-
-            rev_paths = dict((v, k) for k, v in paths.items())
-
-            new_x, new_z = zip(*shs)
-
-            # Have to scale numbers down due to overflow errors
-            new_x = np.array(list(new_x)) / 100
-            new_z = np.array(list(new_z)) / 100
-            new_pos = (pos[0] / 100, pos[1] / 100)
-
-            dists = np.sqrt(((new_x - new_pos[0]) ** 2) + ((new_z - new_pos[1]) ** 2))
-            nearest_idx = np.argmin(dists)
-            normal = get_dist(shs[nearest_idx], shs[paths[nearest_idx]])
-            reverse = get_dist(shs[nearest_idx], shs[rev_paths[nearest_idx]])
-            if normal > reverse:
-                paths = rev_paths
-            break
-        except Exception as e:
-            print("Something went wrong, make sure you hit save, and try again")
-            continue
-
-    return paths, nearest_idx
+def get_dist(x1: Sequence[float], x2: Sequence[float]) -> float:
+    return float(math.hypot(x1[0] - x2[0], x1[1] - x2[1]))
 
 
-def get_dist(x1, x2):
-    return np.sqrt(((x1[0] - x2[0]) ** 2) + ((x1[1] - x2[1]) ** 2))
-
-
-def updateCount(count):
-    f = open("sh_count.txt", "w+")
-    facts = open("fun_facts.txt", "w+")
-
-    lines = [str(count) + "/128\n"]
-
-    if count == 69:
-        facts.writelines(["nice.\n"])
-    if count == 71:
-        facts.writelines(["BRA7-1L\n"])
-    if is_prime(count):
-        facts.writelines(["(prime)\n"])
-
-    f.writelines(lines)
-
-    f.close()
-    facts.close()
-
-
-def printHelp():
-    print(
-        "\n-------------------------------------------------------------------------------------------\n"
-        "All valid commands\n"
-        + "Enter\t\t-\t"
-        + "Marks stronghold as complete and updates count\n"
-        + "0\t\t-\t"
-        + "Marks that you checked the coordinates but there was no stronghold\n"
-        + "e\t\t-\t"
-        + "Allows you to manually adjust the stronghold count\n"
-        + "d\t\t-\t"
-        + "Mark that you went back to spawn, and restart pathfinding from 0 0\n"
-        + "d*\t\t-\t"
-        + "Restart pathfinding from specific coordinates\n"
-        + "-------------------------------------------------------------------------------------------\n"
-    )
-
-
-def getIntInput(prompt):
-    while True:
-        try:
-            user_input = input(prompt)
-            integers = user_input.split()
-            if "/" == user_input[0]:
-                integers = [integers[6], integers[8]]
-                integers = list(map(float, integers))
-            results = list(map(int, integers))
-            return results
-        except Exception as e:
-            print("Integer(s) only input. Seperate multiple numbers with spaces")
-            continue
-
-def getRing(coords):
-    dist = get_dist((0, 0), coords)
-    sh_bounds = [(1280, 2816), (4352, 5888), (7424, 8960), (10496, 12032), (13568, 15104), (16640, 18176), (19712, 21248), (22784, 24320)]
-    for i in range(len(sh_bounds)):
-        if dist > sh_bounds[i][0] and dist < sh_bounds[i][1]:
-            return i + 1
+def getRing(coords: Sequence[float]) -> int:
+    distance = get_dist((0, 0), coords)
+    bounds = [
+        (1280, 2816), (4352, 5888), (7424, 8960), (10496, 12032),
+        (13568, 15104), (16640, 18176), (19712, 21248), (22784, 24320),
+    ]
+    for index, (lower, upper) in enumerate(bounds, 1):
+        if lower < distance < upper:
+            return index
     return 0
 
-def graphAddSH(prev, sh, col1, flag):
-    line = plt.arrow(
-        prev[0],
-        prev[1],
-        sh[0] - prev[0],
-        sh[1] - prev[1],
-        color=col1,
-        width=0.0001,
-        head_width=0,
-        head_length=0,
-        length_includes_head=True,
-    )
-    point = None
-    if not flag:
-        point = plt.scatter(sh[0], sh[1], c=col1, s=30)
-    return line, point
 
-
-#find angles using current position and next stronghold to go to
-def find_angle(pos, nexsh):
-    x1 = int(pos[0])
-    x2 = int(nexsh[0])
-    z1 = int(pos[1])
-    z2 = int(nexsh[1])
-    opposite = x1-x2
-    adjacent = z1-z2
-    ref_angle = abs(math.degrees(math.atan(opposite/adjacent)))
-    if opposite>=0 and adjacent>=0:
-        actual_angle = 180 - ref_angle
-    elif opposite<0 and adjacent<0:
-        actual_angle = 0 - ref_angle
-    elif opposite<0 and adjacent>=0:
-        actual_angle = ref_angle - 180
+def find_angle(pos: Sequence[float], nexsh: Sequence[float]) -> float:
+    opposite = int(pos[0]) - int(nexsh[0])
+    adjacent = int(pos[1]) - int(nexsh[1])
+    if adjacent == 0:
+        return 90.0 if opposite >= 0 else -90.0
+    reference = abs(math.degrees(math.atan(opposite / adjacent)))
+    if opposite >= 0 and adjacent >= 0:
+        angle = 180 - reference
+    elif opposite < 0 and adjacent < 0:
+        angle = -reference
+    elif opposite < 0 and adjacent >= 0:
+        angle = reference - 180
     else:
-        actual_angle = ref_angle
-    actual_angle = round(actual_angle, 2)
-    return actual_angle
+        angle = reference
+    return round(angle, 2)
+
+
+def generatePath(shs: Sequence[Sequence[float]], pos: Sequence[float]):
+    """Return an in-memory nearest-neighbour path.
+
+    Kept as a small compatibility helper for callers of the old utility
+    function. The engine uses its OR-Tools solver directly.
+    """
+    if not shs:
+        return {}, -1
+    remaining = list(range(len(shs)))
+    current = min(remaining, key=lambda i: get_dist(shs[i], pos))
+    order = [current]
+    remaining.remove(current)
+    while remaining:
+        current = min(remaining, key=lambda i: get_dist(shs[order[-1]], shs[i]))
+        order.append(current)
+        remaining.remove(current)
+    return {order[i]: order[i + 1] for i in range(len(order) - 1)}, order[0]
+
+
+def updateCount(count: int, output_dir: str | Path = ".") -> None:
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    (output / "sh_count.txt").write_text(f"{count}/128\n", encoding="utf-8")
+    facts = []
+    if count == 69:
+        facts.append("nice.")
+    if count == 71:
+        facts.append("BRA7-1L")
+    if is_prime(count):
+        facts.append("(prime)")
+    (output / "fun_facts.txt").write_text("\n".join(facts) + ("\n" if facts else ""), encoding="utf-8")
+
+
+def update_map(engine, output_dir: str | Path = ".") -> dict:
+    """Render the engine state and regenerate all OBS-friendly exports."""
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    size = 870
+    image = Image.new("RGBA", (size, size), "white")
+    background = Path(getattr(engine, "background_path", "rings.png"))
+    if background.exists():
+        with Image.open(background) as rings:
+            image.alpha_composite(rings.convert("RGBA").resize((size, size)))
+    draw = ImageDraw.Draw(image)
+
+    def point(coords):
+        return (round((coords[0] + 24320) * size / 48640), round((24320 - coords[1]) * size / 48640))
+
+    for index, sh in enumerate(engine.estimated_strongholds):
+        color = "gray"
+        if index in engine.completed_indices:
+            color = "green"
+        elif index == engine.current_target_index:
+            color = "blue"
+        x, y = point(sh)
+        radius = 4 if color != "gray" else 3
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+
+    history = engine.path_history
+    for start, end, color in history:
+        draw.line((point(start), point(end)), fill=color, width=2)
+    if engine.current_position is not None and engine.get_current_target()["target"] is not None:
+        draw.line((point(engine.current_position), point(engine.get_current_target()["overworld"])), fill="blue", width=2)
+
+    image.save(output / "output.png")
+    updateCount(engine.completed_count, output)
+    return {
+        "output": str(output / "output.png"),
+        "count": str(output / "sh_count.txt"),
+        "facts": str(output / "fun_facts.txt"),
+    }
+
+
+def printHelp() -> None:
+    print("Use the AllPortalsEngine API: next_stronghold, mark_empty_sector, reset_spawn, set_count.")
+
+
+def graphAddSH(*args, **kwargs):
+    """Deprecated plotting hook retained for source compatibility."""
+    return None, None
