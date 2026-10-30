@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AllPortals Collaborative Dashboard</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --text-color: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent: #38bdf8;
+            --accent-hover: #0ea5e9;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --border: #334155;
+        }
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+        }
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        h1, h2 { margin-top: 0; font-size: 1.5rem; color: var(--accent); }
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .stat-box {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border);
+            padding: 12px;
+            border-radius: 8px;
+        }
+        .stat-label { font-size: 0.85rem; color: var(--text-muted); }
+        .stat-value { font-size: 1.25rem; font-weight: bold; margin-top: 4px; }
+        .target-card {
+            background: rgba(56, 189, 248, 0.05);
+            border: 1px solid var(--accent);
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        form { display: flex; flex-direction: column; gap: 12px; }
+        label { font-size: 0.9rem; color: var(--text-muted); }
+        input {
+            background: var(--bg-color);
+            border: 1px solid var(--border);
+            color: var(--text-color);
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        input:focus { outline: 1px solid var(--accent); }
+        .btn-group { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+        button {
+            background-color: var(--accent);
+            color: var(--bg-color);
+            border: none;
+            padding: 10px 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+            flex: 1;
+        }
+        button:hover { background-color: var(--accent-hover); }
+        button.secondary { background-color: #475569; color: white; }
+        button.secondary:hover { background-color: #334155; }
+        button.danger { background-color: var(--danger); color: white; }
+        .map-container {
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: white;
+        }
+        .fun-fact {
+            margin-top: 12px;
+            font-style: italic;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+        .ring-progress {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin: 16px 0 20px;
+        }
+        .ring {
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 8px;
+            text-align: center;
+            font-size: 0.85rem;
+        }
+        .ring.found {
+            color: var(--success);
+            border-color: var(--success);
+            background: rgb(34 197 94 / 0.12);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Left Column: Controls & Stats -->
+    <div class="card">
+        <h1>AllPortals Navigator</h1>
+        
+        <div class="stat-grid">
+            <div class="stat-box">
+                <div class="stat-label">Completed</div>
+                <div class="stat-value" id="completed-count">0 / 128</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Solver Status</div>
+                <div class="stat-value" id="solver-status" style="color: var(--danger);">Unsolved</div>
+            </div>
+        </div>
+
+        <div class="target-card" id="target-section">
+            <h2>Current Target</h2>
+            <div id="target-details">Loading state...</div>
+        </div>
+
+        <h2>Ring Progress</h2>
+        <div class="ring-progress" id="ring-progress" aria-live="polite"></div>
+
+        <div id="controls-area">
+            <!-- Dynamic Form inserted via JS depending on TSP state -->
+        </div>
+    </div>
+
+    <!-- Right Column: Live Map Overlay -->
+    <div class="card map-container">
+        <h2>Live Map</h2>
+        <img id="map-image" src="" alt="AllPortals Route Map">
+        <div class="fun-fact" id="fun-fact-text"></div>
+    </div>
+</div>
+
+<script>
+    let lastSolvedState = null;
+
+    async function fetchState() {
+        try {
+            const res = await fetch('/api/state');
+            const data = await res.json();
+            
+            document.getElementById('completed-count').innerText = data.completed_count;
+
+            const foundRings = new Set(data.ring_progress || []);
+            document.getElementById('ring-progress').innerHTML = Array.from(
+                { length: 8 },
+                (_, index) => {
+                    const ring = index + 1;
+                    const found = foundRings.has(ring);
+                    return `<div class="ring ${found ? 'found' : ''}">Ring ${ring}: ${found ? 'Found' : 'Pending'}</div>`;
+                }
+            ).join('');
+            
+            const solverBadge = document.getElementById('solver-status');
+            if (data.is_solved) {
+                solverBadge.innerText = data.mode || "Active (TSP Solved)";
+                solverBadge.style.color = "var(--success)";
+            } else {
+                solverBadge.innerText = data.mode || "Pre-TSP (Gathering Rings)";
+                solverBadge.style.color = "var(--danger)";
+            }
+
+            const targetDiv = document.getElementById('target-details');
+            if (data.current_target) {
+                const ow = data.current_target.overworld;
+                const nether = data.current_target.nether;
+                targetDiv.innerHTML = `
+                    <p><strong>Overworld:</strong> X: ${ow.x}, Z: ${ow.z}</p>
+                    <p><strong>Nether:</strong> X: ${nether.x}, Z: ${nether.z}</p>
+                    <p><strong>Ring:</strong> ${data.current_target.ring} | <strong>Distance:</strong> ${data.current_target.distance} blocks</p>
+                `;
+            } else {
+                targetDiv.innerHTML = `<p>${data.mode}: log a ring coordinate to begin nearest-neighbor guidance.</p>`;
+            }
+
+            document.getElementById('map-image').src = data.image_url;
+            document.getElementById('fun-fact-text').innerText = data.fun_fact ? `Trivia: ${data.fun_fact}` : "";
+
+            // Only re-render controls if the solver state actually flips, 
+            // preventing the form from wiping while you are typing!
+            if (lastSolvedState !== data.is_solved) {
+                renderControls(data.is_solved, data.current_target);
+                lastSolvedState = data.is_solved;
+            }
+        } catch (err) {
+            console.error("Failed to fetch state:", err);
+        }
+    }
+
+    function renderControls(isSolved, currentTarget) {
+        const area = document.getElementById('controls-area');
+        if (!isSolved) {
+            area.innerHTML = `
+                <h2>Log Initial Ring Stronghold</h2>
+                <form id="ring-form">
+                    <div>
+                        <label>Overworld X</label>
+                        <input type="number" id="ring-x" required placeholder="e.g. 2048">
+                    </div>
+                    <div>
+                        <label>Overworld Z</label>
+                        <input type="number" id="ring-z" required placeholder="e.g. 0">
+                    </div>
+                    <button type="submit" style="margin-top: 10px;">Submit Ring Coordinate</button>
+                </form>
+                ${currentTarget ? `
+                <div class="btn-group">
+                    <button class="secondary" onclick="sendAction('next')">Complete Current Target</button>
+                    <button class="secondary" onclick="sendAction('empty')">Empty Sector</button>
+                </div>` : ''}
+            `;
+            document.getElementById('ring-form').onsubmit = async (e) => {
+                e.preventDefault();
+                const x = parseInt(document.getElementById('ring-x').value);
+                const z = parseInt(document.getElementById('ring-z').value);
+                await sendRequest('/api/ring-stronghold', { x, z });
+            };
+        } else {
+            area.innerHTML = `
+                <h2>Actions</h2>
+                <div class="btn-group">
+                    <button onclick="sendAction('next')">Complete / Next</button>
+                    <button class="secondary" onclick="sendAction('empty')">Empty Sector (0)</button>
+                </div>
+                <div class="btn-group" style="margin-top: 10px;">
+                    <button class="secondary" onclick="resetSpawnPrompt()">Reset Spawn (d)</button>
+                    <button class="danger" onclick="editCountPrompt()">Edit Count (e)</button>
+                </div>
+            `;
+        }
+    }
+
+    async function sendRequest(url, payload) {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const err = await res.json();
+            alert("Error: " + (err.detail || "Unknown error"));
+        } else {
+            fetchState();
+        }
+    }
+
+    async function sendAction(command, extra = {}) {
+        await sendRequest('/api/action', { command, ...extra });
+    }
+
+    function resetSpawnPrompt() {
+        const x = prompt("Enter spawn X coordinate (default 0):", "0");
+        const z = prompt("Enter spawn Z coordinate (default 0):", "0");
+        if (x !== null && z !== null) {
+            sendAction('reset', { x: parseInt(x) || 0, z: parseInt(z) || 0 });
+        }
+    }
+
+    function editCountPrompt() {
+        const count = prompt("Enter new completed count (0-128):");
+        if (count !== null) {
+            const parsed = parseInt(count);
+            if (!isNaN(parsed)) sendAction('edit', { count: parsed });
+        }
+    }
+
+    // Initial load and poll interval for real-time LAN sync
+    fetchState();
+    setInterval(fetchState, 3000);
+</script>
+
+</body>
+</html>

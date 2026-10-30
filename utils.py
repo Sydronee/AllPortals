@@ -99,13 +99,19 @@ def update_map(engine, output_dir: str | Path = ".") -> dict:
 
     for index, sh in enumerate(engine.estimated_strongholds):
         color = "gray"
-        if index in engine.completed_indices:
+        if sh in engine.completed_coordinates:
             color = "green"
         elif index == engine.current_target_index:
             color = "blue"
         x, y = point(sh)
         radius = 4 if color != "gray" else 3
         draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+
+    # Show manually logged ring coordinates even while the tour is unavailable.
+    for ring, sh in enumerate(engine.ring_strongholds, 1):
+        if sh is not None:
+            x, y = point(sh)
+            draw.ellipse((x - 6, y - 6, x + 6, y + 6), fill="cyan", outline="black", width=1)
 
     history = engine.path_history
     for start, end, color in history:

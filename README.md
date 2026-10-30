@@ -1,38 +1,65 @@
 # Installation
-1. Go to releases and download the most recent version from this github repo.
-2. Download Concorde TSP solver, this will be used for finding the optimal path.
-   - [Direct Download for Windows Users](https://www.math.uwaterloo.ca/tsp/concorde/downloads/codes/win/concorde1.1.exe)
-   - [Alternative Downloads](https://www.math.uwaterloo.ca/tsp/concorde/downloads/downloads.htm)
+
+Install the Python dependencies:
+
+```sh
+pip install -r requirements.txt
+```
 
 # Usage
-1. Run the exe found after unzipping the most recent release from this repo. 
-2. It will ask you to first input a stronghold in each ring. Once that is done it will calculate an approximate location of all the other strongholds in each ring. From here the program will create a `stronghold.qs` file. 
-3. You will open this file with the Concorde TSP solver you downloaded earlier and then hit the solve tab at the top and use the default solving parameters. 
-4. Once it is done solving, hit save on Concorde.
-5. Hit enter within the exe to tell it you are done solving in Concorde and have saved. 
-6. The exe will now start displaying coordinates to build nether portals to find strongholds, and will follow the optimal path made by Concorde. Every time you complete a stronghold you can hit enter to progress to the next one. 
 
-## Alternative Commands
-(These commands can only be used after finding the first stronghold in each ring)
-- `h`: displays a list of all the commands
-- `0`: marks that there was no stronghold in the point you visited. This command should be used when you find the empty sector in the 8th ring.
-- `d`: tells the program you forgot to set your spawn and will restart the pathfinding from 0 0. You will need to reopen the `.qs` file in Concorde (make sure you hit "New" then "Open", don't immediately hit "Open") and solve it again using the same method you used earlier.
-- `d*`: does same thing as `d` except you can use coordinates anywhere in the world.
-- `e`: allows you to edit the number of strongholds you've completed. This will only affect the counter and not the visualization of all the strongholds.
+The core workflow is exposed by `AllPortalsEngine`. Record one stronghold
+from each ring; the in-memory OR-Tools solver runs automatically after the
+eighth coordinate:
 
-## OBS Setup
-The program will generate 3 different files you can display on your stream. You can use text capture and image capture to display them on stream.
+```python
+from AllPortals import AllPortalsEngine
 
-![image](https://user-images.githubusercontent.com/80478795/149217848-c62b779f-2208-4ead-9bfe-c19b7322c4c1.png)
+engine = AllPortalsEngine(output_dir=".")
+for x, z in ring_coordinates:
+    engine.add_ring_stronghold(x, z)
 
-### sh_count.txt
-This is a basic text file that says how many strongholds you have completed out of 128.
+print(engine.get_current_target())
+engine.next_stronghold()
+engine.mark_empty_sector()
+engine.reset_spawn()
+engine.set_count(10)
+engine.update_map()
+```
 
-### fun_facts.txt
-This text file will show random facts about the numbers. Such as number is prime or 69 nice. Very silly.
+No `.qs` file, external Concorde installation, or interactive `input()` loop
+is required. Running `python AllPortals.py` only prints a migration message;
+applications should use the engine methods above.
 
-### output.png
-A picture of all the strongholds you've visited. Blue lines and dots indicate the stronghold you are going to, green is strongholds you have already gone to, and grey are ones you have not gone to yet.
+## Engine actions
 
-**Note: there is an OBS bug where sometimes the image will disappear when updated. This will naturally fix itself once you finish the next stronghold as the image will update again. You can also go into OBS and refresh the source by reselecting the png file.**
+These methods return dictionaries describing the resulting state:
+
+- `add_ring_stronghold(x, z)` records the first stronghold in a ring.
+- `next_stronghold()` marks the current target complete.
+- `mark_empty_sector()` skips an empty sector without increasing the count.
+- `reset_spawn(x=0, z=0)` recalculates the remaining route from a position.
+- `set_count(count)` overrides the displayed completion count.
+- `get_current_target()` returns Overworld and Nether coordinates, ring, and
+  remaining count.
+
+## OBS exports
+
+`engine.update_map()` regenerates these files in `output_dir`:
+
+- `sh_count.txt`: the completion count out of 128.
+- `fun_facts.txt`: facts for notable and prime counts.
+- `output.png`: a headless map showing visited, current, and unvisited
+  strongholds.
+## FastAPI service
+
+Run the collaborative backend on the host's Tailscale interface with:
+
+```sh
+uvicorn app:app --host 0.0.0.0 --port 5000
+```
+
+Friends can then use the machine's Tailscale IP or MagicDNS hostname. Generated
+assets are available under `/static`; the API state is available at
+`/api/state`.
 

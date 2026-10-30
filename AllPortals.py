@@ -21,43 +21,77 @@ class AllPortalsEngine:
     def __init__(self, output_dir: str | Path = ".", background_path: str | Path = "rings.png"):
         self.output_dir = Path(output_dir)
         self.background_path = Path(background_path)
-        self.ring_strongholds: list[tuple[int, int]] = []
+        self.ring_strongholds: list[tuple[int, int] | None] = [None] * 8
         self.estimated_strongholds: list[tuple[int, int]] = []
+        self.estimated_rings: list[int] = []
         self.tour_order: list[int] = []
         self.current_target_index: int | None = None
         self.completed_count = 0
         self.completed_indices: set[int] = set()
+        self.completed_coordinates: set[tuple[int, int]] = set()
+        self.skipped_coordinates: set[tuple[int, int]] = set()
         self.path_history: list[tuple[tuple[float, float], tuple[float, float], str]] = []
         self.current_position: tuple[float, float] = (0, 0)
-        self._ring_index = 0
         self._skipped_indices: set[int] = set()
+        self._tsp_solved = False
 
     @property
     def solved(self) -> bool:
-        return bool(self.tour_order)
+        return self._tsp_solved
+
+    @property
+    def mode(self) -> str:
+        return "Active (TSP Solved)" if self.solved else "Pre-TSP (Gathering Rings)"
 
     def add_ring_stronghold(self, x: float, z: float) -> dict:
-        if self._ring_index >= 8:
-            raise ValueError("All eight ring strongholds have already been recorded")
         coordinates = (int(x), int(z))
-        self.ring_strongholds.append(coordinates)
-        self._ring_index += 1
-        self.completed_count = len(self.ring_strongholds)
-        if self._ring_index == 8:
+        ring = getRing(coordinates)
+        if ring == 0:
+            raise ValueError("Coordinates do not fall within one of the eight ring layers")
+        ring_index = ring - 1
+        if self.ring_strongholds[ring_index] is not None:
+            raise ValueError(f"Ring {ring} has already been recorded")
+        if all(stronghold is not None for stronghold in self.ring_strongholds):
+            raise ValueError("All eight ring strongholds have already been recorded")
+        self.ring_strongholds[ring_index] = coordinates
+        self.completed_count += 1
+        self.completed_coordinates.add(coordinates)
+        self._predict_ring(ring_index, coordinates)
+        if sum(stronghold is not None for stronghold in self.ring_strongholds) == 8:
             self._predict_strongholds()
             self.solve_tsp()
+        else:
+            self._select_pre_tsp_target()
         return self.get_current_target()
 
+    def _predict_ring(self, ring: int, stronghold: tuple[int, int]) -> None:
+        """Replace one ring's estimates without requiring the other rings."""
+        self.estimated_strongholds = [
+            sh for sh, existing_ring in zip(self.estimated_strongholds, self.estimated_rings)
+            if existing_ring != ring + 1
+        ]
+        self.estimated_rings = [
+            existing_ring for existing_ring in self.estimated_rings if existing_ring != ring + 1
+        ]
+        x, z = stronghold
+        angle = np.arctan2(z, x)
+        estimates = [stronghold]
+        for _ in range(self.sh_per_ring[ring] - 1):
+            angle += 2 * np.pi / self.sh_per_ring[ring]
+            estimates.append((
+                round(self.magnitude_per_ring[ring] * np.cos(angle)),
+                round(self.magnitude_per_ring[ring] * np.sin(angle)),
+            ))
+        self.estimated_strongholds.extend(estimates)
+        self.estimated_rings.extend([ring + 1] * len(estimates))
+
     def _predict_strongholds(self) -> None:
-        self.estimated_strongholds = list(self.ring_strongholds)
-        for ring, (x, z) in enumerate(self.ring_strongholds):
-            angle = np.arctan2(z, x)
-            for _ in range(self.sh_per_ring[ring] - 1):
-                angle += 2 * np.pi / self.sh_per_ring[ring]
-                self.estimated_strongholds.append((
-                    round(self.magnitude_per_ring[ring] * np.cos(angle)),
-                    round(self.magnitude_per_ring[ring] * np.sin(angle)),
-                ))
+        if any(stronghold is None for stronghold in self.ring_strongholds):
+            raise ValueError("Eight ring strongholds are required before prediction")
+        self.estimated_strongholds = []
+        self.estimated_rings = []
+        for ring, stronghold in enumerate(self.ring_strongholds):
+            self._predict_ring(ring, stronghold)
 
     def solve_tsp(self) -> list[int]:
         if len(self.estimated_strongholds) != 128:
@@ -86,12 +120,25 @@ class AllPortalsEngine:
             order.append(manager.IndexToNode(index))
             index = solution.Value(routing.NextVar(index))
         # The eight manually found strongholds are already completed.
-        self.completed_indices = set(range(8))
-        remaining = [i for i in order if i not in self.completed_indices]
-        start = min(range(len(remaining)), key=lambda i: self._distance(self.ring_strongholds[-1], self.estimated_strongholds[remaining[i]]))
+        self.completed_indices = {
+            index for index, stronghold in enumerate(self.estimated_strongholds)
+            if stronghold in self.completed_coordinates
+        }
+        self._skipped_indices = {
+            index for index, stronghold in enumerate(self.estimated_strongholds)
+            if stronghold in self.skipped_coordinates
+        }
+        self._tsp_solved = True
+        remaining = [
+            i for i in order
+            if i not in self.completed_indices and i not in self._skipped_indices
+        ]
+        start = min(
+            range(len(remaining)),
+            key=lambda i: self._distance(self.current_position, self.estimated_strongholds[remaining[i]]),
+        )
         self.tour_order = remaining[start:] + remaining[:start]
         self.current_target_index = self.tour_order[0] if self.tour_order else None
-        self.current_position = self.ring_strongholds[-1]
         return self.tour_order
 
     def _distance(self, a, b):
@@ -103,16 +150,40 @@ class AllPortalsEngine:
         target = self.estimated_strongholds[self.current_target_index]
         if completed:
             self.completed_indices.add(self.current_target_index)
+            self.completed_coordinates.add(target)
             self.completed_count += 1
             color = "green"
         else:
             self._skipped_indices.add(self.current_target_index)
+            self.skipped_coordinates.add(target)
             color = "gray"
         self.path_history.append((self.current_position, target, color))
         self.current_position = target
-        next_index = len(self.completed_indices) + len(self._skipped_indices) - 8
-        self.current_target_index = self.tour_order[next_index] if next_index < len(self.tour_order) else None
+        if self.solved:
+            self._select_tsp_target()
+        else:
+            self._select_pre_tsp_target()
         return self.get_current_target()
+
+    def _select_pre_tsp_target(self) -> None:
+        candidates = [
+            index for index, stronghold in enumerate(self.estimated_strongholds)
+            if stronghold not in self.completed_coordinates
+            and stronghold not in self.skipped_coordinates
+        ]
+        self.current_target_index = (
+            min(candidates, key=lambda index: self._distance(self.current_position, self.estimated_strongholds[index]))
+            if candidates else None
+        )
+
+    def _select_tsp_target(self) -> None:
+        self.current_target_index = next(
+            (
+                index for index in self.tour_order
+                if index not in self.completed_indices and index not in self._skipped_indices
+            ),
+            None,
+        )
 
     def next_stronghold(self) -> dict:
         return self._advance(True)
@@ -125,7 +196,9 @@ class AllPortalsEngine:
         remaining = [i for i in self.tour_order if i not in self.completed_indices and i not in self._skipped_indices]
         if remaining:
             self.tour_order = sorted(remaining, key=lambda i: self._distance(self.current_position, self.estimated_strongholds[i]))
-            self.current_target_index = self.tour_order[0]
+            self._select_tsp_target()
+        elif not self.solved:
+            self._select_pre_tsp_target()
         return self.get_current_target()
 
     def set_count(self, count: int) -> dict:

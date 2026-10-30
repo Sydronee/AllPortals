@@ -21,3 +21,4 @@ build/AllPortals/warn-AllPortals.txt
 build/AllPortals/xref-AllPortals.html
 dist/AllPortals.exe
 dist/rings.png
+__pycache__
