@@ -207,6 +207,8 @@
         <details>
             <summary>I died / moved: reset my position</summary>
             <form id="reset-form">
+                <label for="reset-paste">Paste F3+C here (optional)</label>
+                <input type="text" id="reset-paste" placeholder="/execute in minecraft:overworld run tp @s ..." autocomplete="off">
                 <div class="row">
                     <div>
                         <label for="reset-x">X</label>
@@ -438,6 +440,15 @@
             player: mine ? mine.name : null,
         });
         if (data) e.target.reset();
+    };
+
+    $('reset-paste').oninput = (e) => {
+        const match = e.target.value.match(/\btp\s+@s\s+(-?(?:\d+(?:\.\d+)?|\.\d+))\s+(-?(?:\d+(?:\.\d+)?|\.\d+))\s+(-?(?:\d+(?:\.\d+)?|\.\d+))/i);
+        if (!match) return;
+        const scale = /the_nether/i.test(e.target.value) ? 8 : 1;
+        $('reset-x').value = Math.floor(parseFloat(match[1]) * scale);
+        $('reset-z').value = Math.floor(parseFloat(match[3]) * scale);
+        e.target.value = '';
     };
 
     $('reset-form').onsubmit = (e) => {
