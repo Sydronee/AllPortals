@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AllPortals Player Overlay</title>
+    <style>
+        html, body { margin: 0; background: transparent; overflow: hidden; }
+        body {
+            color: #fff;
+            font-family: system-ui, "Segoe UI", sans-serif;
+            font-weight: bold;
+            text-shadow: 0 0 5px #000, 0 0 5px #000, 2px 2px 3px #000;
+            padding: 8px 12px;
+        }
+        #overworld { font-size: 48px; }
+        #details { font-size: 24px; margin-top: 4px; }
+        #message { font-size: 18px; font-weight: normal; }
+        [hidden] { display: none; }
+    </style>
+</head>
+<body>
+    <div id="target" hidden>
+        <div id="overworld"></div>
+        <div id="details"></div>
+    </div>
+    <div id="message" hidden></div>
+<script>
+    const name = decodeURIComponent(location.pathname.split('/').pop());
+    const target = document.getElementById('target');
+    const overworld = document.getElementById('overworld');
+    const details = document.getElementById('details');
+    const message = document.getElementById('message');
+
+    function showTarget(data) {
+        if (data.index === null) {
+            target.hidden = true;
+            message.textContent = 'No target';
+            message.hidden = false;
+            return;
+        }
+        const world = data.overworld;
+        const nether = data.nether;
+        overworld.textContent = `Overworld ${world.x}, ${world.z}`;
+        details.textContent =
+            `Nether ${nether.x}, ${nether.z} | Ring ${data.ring} | ` +
+            `${data.distance} blocks | face ${data.angle}°`;
+        message.hidden = true;
+        target.hidden = false;
+    }
+
+    async function refresh() {
+        try {
+            const response = await fetch(`/api/next/${encodeURIComponent(name)}`);
+            if (response.status === 404) {
+                message.textContent = 'Unknown player';
+                message.hidden = false;
+                return;
+            }
+            if (!response.ok) return;
+            showTarget(await response.json());
+        } catch (err) { /* server restarting: keep the last frame */ }
+    }
+    refresh();
+    setInterval(refresh, 1000);
+</script>
+</body>
+</html>

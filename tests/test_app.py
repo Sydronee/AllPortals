@@ -202,3 +202,46 @@ def test_index_page_is_served(client):
 def test_overlay_page_is_served(client):
     page = client.get("/overlay")
     assert page.status_code == 200 and "/api/state" in page.text
+
+
+def test_combined_player_overlay_is_served(client):
+    page = client.get("/overlay?player=Syd")
+    assert page.status_code == 200
+    assert "completed_count" in page.text
+    assert "remaining_count" in page.text
+    assert "stops remaining" not in page.text
+    assert "player-target" in page.text
+    assert "player-count" in page.text
+
+
+def test_next_endpoint_returns_player_target(client):
+    start_run(client)
+    response = client.get("/api/next/sYD")
+    assert response.status_code == 200
+    target = response.json()
+    assert target["player"] == "Syd"
+    assert target["index"] is not None
+    assert set(target) == {
+        "player", "index", "overworld", "nether", "ring", "distance",
+        "angle", "route_remaining",
+    }
+    text = client.get("/api/next/Syd?format=text")
+    assert text.status_code == 200 and "Overworld" in text.text and "Nether" in text.text
+
+
+def test_next_endpoint_errors_for_unknown_or_empty_roster(client):
+    assert client.get("/api/next/Ghost").status_code == 409
+    client.post("/api/players", json={"name": "Syd"})
+    unknown = client.get("/api/next/Ghost")
+    assert unknown.status_code == 404 and "Unknown player" in unknown.json()["detail"]
+
+
+def test_next_endpoint_returns_no_target(client, app_module):
+    client.post("/api/players", json={"name": "Syd"})
+    app_module.engine.players["Syd"].route = list(range(128))
+    app_module.engine.estimated_strongholds = [None] * 128
+    response = client.get("/api/next/Syd")
+    assert response.status_code == 200
+    assert response.json()["index"] is None
+    assert response.json()["overworld"] is None
+    assert client.get("/api/next/Syd?format=text").text == "No target"

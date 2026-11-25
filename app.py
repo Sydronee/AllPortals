@@ -34,6 +34,7 @@ DATA_DIR = HOME_DIR / "data"  # private: the saved run lives here
 STATE_FILE = DATA_DIR / "state.json"
 INDEX_FILE = ROOT_DIR / "index.html"
 OVERLAY_FILE = ROOT_DIR / "overlay.html"
+PLAYER_OVERLAY_FILE = ROOT_DIR / "player_overlay.html"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -162,6 +163,7 @@ def _state_payload() -> dict:
     return {
         "version": engine.version,
         "completed_count": f"{engine.completed_count} / {TOTAL_STRONGHOLDS}",
+        "remaining_count": TOTAL_STRONGHOLDS - engine.completed_count,
         "ring_progress": [r for r, sh in enumerate(engine.ring_strongholds, 1) if sh is not None],
         "mode": engine.mode,
         "is_solved": engine.plan_valid and not engine.plan_dirty,
@@ -237,10 +239,52 @@ def overlay() -> FileResponse:
     return FileResponse(OVERLAY_FILE)
 
 
+@app.get("/overlay/{name}")
+def player_overlay(name: str) -> FileResponse:
+    """Self-refreshing page for one player's target."""
+    return FileResponse(PLAYER_OVERLAY_FILE)
+
+
 @app.get("/api/state")
 def get_state() -> dict:
     with engine_lock:
         return _state_payload()
+
+
+@app.get("/api/next/{name}")
+def get_next(name: str, format: str | None = None):
+    with engine_lock:
+        try:
+            if not engine.players:
+                raise ValueError("No players have joined yet")
+            target = engine.get_current_target(name)
+            player_name = target["player"]
+            payload = {
+                "player": player_name,
+                "index": target["index"],
+                "overworld": _xz(target["overworld"]) if target["overworld"] else None,
+                "nether": _xz(target["nether"]) if target["nether"] else None,
+                "ring": target["ring"],
+                "distance": target["distance"],
+                "angle": target["angle"],
+                "route_remaining": engine.route_remaining(player_name),
+            }
+        except UnknownPlayer as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if format == "text":
+        if payload["index"] is None:
+            return PlainTextResponse("No target")
+        overworld = payload["overworld"]
+        nether = payload["nether"]
+        return PlainTextResponse(
+            f"Ring {payload['ring']} | Overworld {overworld['x']}, {overworld['z']} | "
+            f"Nether {nether['x']}, {nether['z']} | {payload['distance']} blocks | "
+            f"face {payload['angle']}"
+        )
+    return payload
 
 
 @app.post("/api/players")

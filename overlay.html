@@ -6,10 +6,28 @@
     <title>AllPortals Overlay</title>
     <style>
         html, body { margin: 0; background: transparent; overflow: hidden; }
-        body { font-family: system-ui, "Segoe UI", sans-serif; color: #fff; text-shadow: 0 0 4px #000, 0 0 4px #000; }
+        body {
+            font-family: system-ui, "Segoe UI", sans-serif;
+            color: #fff;
+            text-shadow: 0 0 4px #000, 0 0 4px #000;
+        }
         #map { display: block; width: 100%; height: auto; }
         .text { font-size: 28px; font-weight: bold; padding: 4px 8px; }
         .fact { font-size: 18px; font-weight: normal; font-style: italic; }
+        #info {
+            position: absolute;
+            right: 12px;
+            bottom: 12px;
+            max-width: 90%;
+            padding: 8px 12px;
+            background: rgb(0 0 0 / 55%);
+            font-size: 22px;
+            font-weight: bold;
+            line-height: 1.3;
+        }
+        #player-target { font-size: 26px; }
+        #player-details { font-size: 19px; font-weight: normal; }
+        #player-count { font-size: 19px; font-weight: normal; margin-top: 2px; }
         [hidden] { display: none; }
     </style>
 </head>
@@ -17,12 +35,23 @@
     <img id="map" alt="AllPortals map" hidden>
     <div class="text" id="count" hidden></div>
     <div class="text fact" id="fact" hidden></div>
+    <div id="info" hidden>
+        <div id="player-target"></div>
+        <div id="player-details"></div>
+        <div id="player-count"></div>
+    </div>
 <script>
-    // /overlay?show=map,count,fact   (default: map)
-    const show = new Set((new URLSearchParams(location.search).get('show') || 'map').split(','));
+    // /overlay?player=Syd&show=map,count,target   (default: map)
+    const params = new URLSearchParams(location.search);
+    const playerName = params.get('player');
+    const show = new Set((params.get('show') || (playerName ? 'map,count,target' : 'map')).split(','));
     const map = document.getElementById('map');
     const count = document.getElementById('count');
     const fact = document.getElementById('fact');
+    const info = document.getElementById('info');
+    const playerTarget = document.getElementById('player-target');
+    const playerDetails = document.getElementById('player-details');
+    const playerCount = document.getElementById('player-count');
     map.hidden = !show.has('map');
 
     async function refresh() {
@@ -36,10 +65,33 @@
                 next.onload = () => { map.src = next.src; map.dataset.src = state.image_url; map.hidden = false; };
                 next.src = state.image_url;
             }
-            count.hidden = !show.has('count');
-            count.textContent = state.completed_count;
+            count.hidden = !show.has('count') || (show.has('target') && !!playerName);
+            count.textContent = `${state.completed_count} | ${state.remaining_count} left`;
             fact.textContent = state.fun_fact || '';
             fact.hidden = !show.has('fact') || !state.fun_fact;
+            if (show.has('target') && playerName) {
+                playerCount.textContent = show.has('count')
+                    ? `${state.completed_count} | ${state.remaining_count} left`
+                    : '';
+                const player = state.players.find((item) => item.name.toLowerCase() === playerName.trim().toLowerCase());
+                if (!player) {
+                    playerTarget.textContent = `${playerName}: unknown player`;
+                    playerDetails.textContent = '';
+                } else if (!player.target) {
+                    playerTarget.textContent = `${player.name}: No target`;
+                    playerDetails.textContent = '';
+                } else {
+                    const target = player.target;
+                    playerTarget.textContent = `${player.name}: Overworld ${target.overworld.x}, ${target.overworld.z}`;
+                    playerDetails.textContent =
+                        `Nether ${target.nether.x}, ${target.nether.z} | Ring ${target.ring} | ` +
+                        `${target.distance} blocks | face ${target.angle}°`;
+                }
+                info.hidden = false;
+            } else {
+                playerCount.textContent = '';
+                info.hidden = true;
+            }
         } catch (err) { /* server restarting: keep the last frame */ }
     }
     refresh();

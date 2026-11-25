@@ -86,6 +86,9 @@ a transparent background. Choose what to show with `?show=`:
 - `/overlay` shows the map (the default)
 - `/overlay?show=map,count,fact` adds the completed count and the trivia line
 - `/overlay?show=count` shows only the count
+- `/overlay?player=Syd` shows the map, total completion count, and Syd's target
+  details in one browser source. Add `target` or `count` to `show=` to control
+  the displayed sections, for example `/overlay?player=Syd&show=map,count,target`.
 
 # Using the engine from Python
 
